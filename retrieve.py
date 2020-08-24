@@ -391,6 +391,7 @@ def create_gop(instrument,speclist,stime,etime, logger=rootlogger):
     speclist[i2spt]['SIA'],speclist[i2spt]['FVSI'],speclist[i2spt]['WSPD'], speclist[i2spt]['WDIR'],\
     '','',gggconfig[instrument]['nus'],'',gggconfig[instrument]['nue'],'',0.9999990,speclist[i2spt]['LWN'],9900.0,'.',0.002,1.0)
     with open(gopfile,'a') as f: f.write(line+'\n')   
+  commandstar('chmod 775 %s'%gopfile)
   logger.info('finished gop created')
   return gopfile  
 
@@ -421,6 +422,12 @@ def run_grl(instrument='bruker125hr@xianghe',stime=None,etime=None,gopfile=None,
   ####input for gsetup
   with open('gsetup.input','w')as f: f.write('g\n%s\n5\n%d\ny\n'%(str(k),windows))
   subprocess.call("$GGGPATH/bin/gsetup < gsetup.input",shell=True)
+  
+def _clean(stime,etime,pro):
+  ## clean the files after GFIT running
+  lsefile = os.path.join(gggpath,'lse/gnd','%s%s_%s.lse'%(pro,stime.strftime('%Y%m%d'),etime.strftime('%Y%m%d')))
+  if os.path.isfile(lsefile): os.remove(lsefile)
+
   
 
 def disable_spt():

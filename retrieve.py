@@ -241,7 +241,7 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,logger=rootlogger
   i2stemp = os.path.join(gggconfig['ggg2020.config']['i2s_temp_folder'], gggconfig[instrument]['i2s_temp'])
   if not os.path.join(i2stemp): logger.error('the i2s temp is not exsited: %s'%i2stemp); return 1
   outpath = os.path.join(gggconfig['ggg2020.config']['i2spath'],'i2s',instrument.split('@')[1],instrument.split('@')[0])
-  if not os.path.isdir(outpath): subprocess.call('mkdir -p %s'%outpath, shell=True)
+  if not os.path.isdir(outpath): commandstar('mkdir -p %s; chmod -R 775 %s'%(outpath,outpath))
   lat = gggconfig[instrument]['lat']
   lon = gggconfig[instrument]['lon']
   alt = gggconfig[instrument]['alt']
@@ -269,10 +269,10 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,logger=rootlogger
       i2s_spectra_output = './%s/'%(spectype)+mtime.strftime('%Y/%m')+'/' 
       oldfiles = glob.glob(os.path.join(i2s_spectra_output,mtime.strftime(gggconfig[instrument]['i2sfmt']))+'*')
       if len(oldfiles): commandstar('rm %s'%(os.path.join(i2s_spectra_output,mtime.strftime(gggconfig[instrument]['i2sfmt']))+'*')) ### remove the previous spectra
-      if not os.path.isdir(i2s_spectra_output): subprocess.call('mkdir -p %s'%i2s_spectra_output, shell=True)
+      if not os.path.isdir(i2s_spectra_output): commandstar('mkdir -p %s; chmod -R 775 %s'%(i2s_spectra_output,i2s_spectra_output))
       i2s_in_daily = os.path.join(outpath,mtime.strftime('opus_i2s_%Y%m%d.in'))
       for folder in ('input','log','command'):
-        if not os.path.isdir(os.path.join(outpath,folder)):subprocess.call('mkdir -p %s'%os.path.join(outpath,folder),shell=True)
+        if not os.path.isdir(os.path.join(outpath,folder)):commandstar('mkdir -p %s; chmod -R 775 %s'%(os.path.join(outpath,folder),os.path.join(outpath,folder)))
       nk =1
       i2s_in_days.append(i2s_in_daily)
       ifgtype='DC'
@@ -320,9 +320,9 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,logger=rootlogger
       finally: bar.update(i) 
     ###subprocess.call("parallel -j%s --will-cite < %s"%(npool,listcommand),shell=True)###output spectra data   
     ### mv all the related files to the corresponding folders
-    subprocess.call('mv *.in ./input',shell=True)
-    subprocess.call('mv *.out ./log',shell=True)
-    subprocess.call('mv *commands.txt ./command',shell=True)  
+    subprocess.call('chmod 660 *.in; mv *.in ./input',shell=True)
+    subprocess.call('chmod 660 *.out; mv *.out ./log',shell=True)
+    subprocess.call('chmod 660 *commands.txt;mv *commands.txt ./command',shell=True)  
     logger.info('I2S has finished !')
     ### change the access
     days=0
@@ -374,7 +374,7 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,logger=rootlogger
     stime += dt.timedelta(1)   
   return out
   
-def create_mod(instrument,stime,etime,logger=rootlogger):
+def create_mod(instrument,stime,etime,quiet=True,logger=rootlogger):
   """download the a priori profile from the caltech serve
   arguments:
       -instrument  such as 'bruker125hr@xianghe'
@@ -384,6 +384,7 @@ def create_mod(instrument,stime,etime,logger=rootlogger):
       -Nonthing   
   """
   logger=getlogger(logger,'create_mod')
+  logger.info('Downloading the FPIT models')
   wkdir = os.path.join(gggconfig['ggg2020.config']['modpath'],instrument.split('@')[1],'mod')
   if not os.path.isdir(wkdir): subprocess.call('mkdir -p %s'%wkdir,shell=True)
   os.chdir(wkdir)
@@ -394,9 +395,9 @@ def create_mod(instrument,stime,etime,logger=rootlogger):
   if gggconfig[instrument].get('tcconsite',False):
     ### direct download from caltech
     subprocess.call('$GGGPATH/utils/python/list_mod_vmr_links %s %s %s > links.txt'%(site, stime.strftime('%Y%m%d'), etime.strftime('%Y%m%d')),shell=True)
-    subprocess.call('wget --user=anonymous --password=mahesh.sha@aeronomie.be -i links.txt > /dev/null',shell=True)
+    subprocess.call('wget %s --user=anonymous --password=mahesh.sha@aeronomie.be -i links.txt '%('--quiet' if quiet else ''),shell=True)
     for gzfile in glob.glob('./*.tgz'):
-      subprocess.call('tar zxvf %s'%gzfile,shell=True)
+      subprocess.call('tar -zxf %s %s'%(gzfile, '>/dev/null' if quiet else ''),shell=True)
       subprocess.call('rm %s'%gzfile,shell=True)
     ## move these files to good position 
     commandstar('chmod 660 ./*.mod; mv ./*.mod $GGGPATH/models/gnd')
@@ -405,9 +406,9 @@ def create_mod(instrument,stime,etime,logger=rootlogger):
   elif 'maido' in instrument:
     ## although maido is not the standard TCCON site, we can use the stdenis a priori data for maido site
     subprocess.call('$GGGPATH/utils/python/list_mod_vmr_links ra %s %s > links.txt'%(stime.strftime('%Y%m%d'), etime.strftime('%Y%m%d')),shell=True)
-    subprocess.call('wget --user=anonymous --password=mahesh.sha@aeronomie.be -i links.txt',shell=True)
+    subprocess.call('wget %s --user=anonymous --password=mahesh.sha@aeronomie.be -i links.txt '%('--quiet' if quiet else ''),shell=True)
     for gzfile in glob.glob('./*.tgz'):
-      subprocess.call('tar zxvf %s'%gzfile,shell=True)
+      subprocess.call('tar -zxf %s %s'%(gzfile, '>/dev/null' if quiet else ''),shell=True)
       subprocess.call('rm %s'%gzfile,shell=True)
     ## move these files to good position 
     commandstar('chmod 660 ./*.mod; mv ./*.mod $GGGPATH/models/gnd')

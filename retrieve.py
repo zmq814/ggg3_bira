@@ -18,6 +18,7 @@ import multiprocessing
 import subprocess
 rootlogger=logging.getLogger(__name__)
 from importlib import reload
+import fnmatch,time
 
 
 #### BASIC FUNCTIONS AND CLASSES
@@ -61,9 +62,14 @@ def check_strategy(instrument,logger=rootlogger):
   if not os.path.isfile(i2stemp):
     logger.error('the I2S template is not existed: %s \n also please chech the flimit.??'%i2stemp)
     return 1
+  celltemp = os.path.join(gggconfig['ggg2020.config']['gggpath'],'cell_status_info',gggconfig[instrument]['pro']+'_cell_status_info.dat')
+  if not os.path.isfile(celltemp):
+    logger.error('the cell template is not existed: %s \n '%celltemp)
+    return 1
   windows = gggconfig[instrument].get('windows',1)
   if  windows!=1:
     logger.info('The retrieval window is %s (not standard TCCON retrieval windows); are you sure?'%windows)
+    time.sleep(5)
   return 0
   
   
@@ -105,31 +111,55 @@ def create_filelist(instrument, start_date, end_date=None):
     del temp  
   return file_list
 
-def get_spec_info(instrument,file_list,logger=rootlogger):
+
+def filterspectra(specinfo,spfilter=[],sublist=None,logger=rootlogger):
+
+  if sublist==None: llist=list(specinfo.keys())
+  else: llist=list(sublist)
+  if not specinfo: logger.error('Provide a specinfo instance, from get_spec_info');return [],[]
+  logger.info('Using\n\tspfilter=%s'%','.join(list(zip(*spfilter))[1] if len(spfilter) else '-'))
+  lllist=list(llist)
+  badspec=[]
+  for spec in llist:
+    removespec=[]
+    barcos=specinfo[spec]
+    ### filter on spfilter  
+    [removespec.append("bad value for %s"%(key)) for filterfunc,key in spfilter if isfinite(barcos[key]).any() and filterfunc(barcos[key])]
+    if len(removespec)>0: lllist.remove(spec); badspec.append(spec)
+  return lllist, badspec
+
+
+def get_spec_info(instrument,file_list,specfilter=True,logger=rootlogger):
   """get the information based on the instrument and spectra name
 
   Arguments:
       instrument -- such as 'bruker125hr@xianghe'
       file_list --  create_filelist(...) 
+  
+  Optional arguments:
+      specfilter -- T/F filter the spectra with the gggconfig['spectrum.filter.barocs'] or not
+  
   outputs:
       specinfo -- the OrderedDict where the information of the spectra are included
   """
   logger=getlogger(logger,'get_spec_info')
   instrument = instrument.lower()
-  out = OrderedDict()
+  specinfo = OrderedDict()
   if not instrument in gggconfig: raise('The instrument %s is not defined in the ggg.config'%instrument); return 1
   if 'barcos' in gggconfig[instrument]: 
     for specf in file_list:
       logger.debug('reading parameters from BARCOS file')
       basef = os.path.basename(specf)
-      out[basef]={}
+      specinfo[basef]={}
       basefmt = gggconfig[instrument]['specfmt']
-      out[basef]['date'] = dt.datetime.strptime(re.findall('[0-9]+',basef.split('.')[0])[0],basefmt)
-      for key in ('Pins','Tins','Hins','Pout','Tout','Hout', 'WSPD', 'WDIR','SNR'): 
-        out[basef][key] = nan ## default values
-      out[basef]['SIA'] = 2190.0 
-      out[basef]['FVSI'] = 0.0074
-      bfile = os.path.join(out[basef]['date'].strftime(gggconfig[instrument]['barcos']),out[basef]['date'].strftime('%Y%m%d.hdf'))
+      specinfo[basef]['date'] = dt.datetime.strptime(re.findall('[0-9]+',basef.split('.')[0])[0],basefmt)
+      for key in ('Pins','Tins','Hins','Pout','Tout','Hout', 'WSPD', 'WDIR'): 
+        specinfo[basef][key] = 0 ## default values
+      for key in ('SNR',): 
+        specinfo[basef][key] = nan ## default values  
+      specinfo[basef]['SIA'] = 2190.0 
+      specinfo[basef]['FVSI'] = 0.0074
+      bfile = os.path.join(specinfo[basef]['date'].strftime(gggconfig[instrument]['barcos']),specinfo[basef]['date'].strftime('%Y%m%d.hdf'))
       if not os.path.isfile(bfile): logger.error('The barcos file is missing: %s'%bfile); return 1
       fid = h5py.File(bfile,'r')
       #print (fid['OpusFileOriginal'][...][0])
@@ -137,35 +167,53 @@ def get_spec_info(instrument,file_list,logger=rootlogger):
       if not basef in specs: 
         logger.warning('%s is not in the barcos file'%basef); 
         _temp = o.Opus(specf); _temp.get_data()
-        out[basef]['stime']= out[basef]['date']+(dt.datetime(1,1,1,*[int(x) for x in _temp.param[-1]['TIM'][0:8].split(':')])-dt.datetime(1,1,1))         
-        out[basef]['LWN']= float(_temp.param[0]['LWN'])        
-        continue
+        try:
+          tblock = [x for x in _temp.param if 'TIM' in x][0]
+          lblock = [x for x in _temp.param if 'LWM' in x][0]
+          specinfo[basef]['stime']= specinfo[basef]['date']+(dt.datetime(1,1,1,*[int(x) for x in tblock['TIM'][0:8].split(':')])-dt.datetime(1,1,1))         
+          specinfo[basef]['LWN']= float(lblock['LWN']) 
+        except: continue   
+        ### compute_snr(instrument)    
       indx = specs.index(basef)
-      out[basef]['Pins'] = fid['Inst']['PRS'][...][indx]
-      out[basef]['Pout'] = fid['Meteo/P']['Average'][...][indx]
-      out[basef]['Tins'] = fid['Inst']['TSC'][...][indx]
-      out[basef]['Tout'] = fid['Meteo/T']['Average'][indx]
-      out[basef]['Hins'] = 0.0 ### no detector inside the instrument for the humidity ### TBD
-      out[basef]['Hout'] = fid['Meteo/RelativeHumidity']['Average'][indx]
-      out[basef]['WSPD'] = fid['Meteo/WindSpeed']['Average'][indx]  
-      out[basef]['WDIR'] = fid['Meteo/WindDirection']['Average'][indx]        
-      out[basef]['SIA'] = fid['Meteo/Sun']['Average'][indx]  
-      out[basef]['FVSI'] = fid['Meteo/Sun']['StandardDeviation'][indx]/fid['Meteo/Sun']['Average'][indx]*1e-2
-      out[basef]['stime']= out[basef]['date']+(dt.datetime(1,1,1,*fid['StartTime'][indx])-dt.datetime(1,1,1)) 
-      out[basef]['SNR']= fid['Spectra']['SNR'][indx]
-      out[basef]['LWN']= fid['Inst']['LWN'][indx]
+      specinfo[basef]['Pins'] = fid['Inst']['PRS'][...][indx]
+      specinfo[basef]['Pout'] = fid['Meteo/P']['Average'][...][indx]
+      specinfo[basef]['Tins'] = fid['Inst']['TSC'][...][indx]
+      specinfo[basef]['Tout'] = fid['Meteo/T']['Average'][indx]
+      specinfo[basef]['Hins'] = 0.0 ### no detector inside the instrument for the humidity ### TBD
+      specinfo[basef]['Hout'] = fid['Meteo/RelativeHumidity']['Average'][indx]
+      specinfo[basef]['WSPD'] = fid['Meteo/WindSpeed']['Average'][indx]  
+      specinfo[basef]['WDIR'] = fid['Meteo/WindDirection']['Average'][indx]        
+      specinfo[basef]['SIA'] = fid['Meteo/Sun']['Average'][indx]  
+      specinfo[basef]['FVSI'] = fid['Meteo/Sun']['StandardDeviation'][indx]/fid['Meteo/Sun']['Average'][indx]*1e-2
+      specinfo[basef]['stime']= specinfo[basef]['date']+(dt.datetime(1,1,1,*fid['StartTime'][indx])-dt.datetime(1,1,1)) 
+      specinfo[basef]['SNR']= fid['Spectra']['SNR'][indx]
+      specinfo[basef]['LWN']= fid['Inst']['LWN'][indx]
+      for key in ('Pins','Tins','Hins','Pout','Tout','Hout', 'WSPD', 'WDIR'): 
+        if not isfinite(specinfo[basef][key]): specinfo[basef][key] = 0 ## default values
   else:
    ####### TBD
     for specf in file_list:
       logger.info('reading parameters from other meteo file and so on ...')  
       basef = os.path.basename(specf)
       for key in ('Pins','Tins','Hins','Pout','Tout','Hout', 'WSPD', 'WDIR'): 
-        out[basef][key] = nan ## default values
-      out[basef]['SIA'] = 2190.0 
-      out[basef]['FVSI'] = 0.0074
-      out[basef]['LWN'] =15798.014
-  #OrderedDict(sorted(out.items(),key=lambda x:x[1]['stime']))
-  return OrderedDict(sorted(out.items(),key=lambda x:x[1]['stime']))
+        specinfo[basef][key] = nan ## default values (for normal TCCON retrieval the Pout is very important!)
+      specinfo[basef]['SIA'] = 2190.0 
+      specinfo[basef]['FVSI'] = 0.0074
+      specinfo[basef]['LWN'] =15798.014
+  #OrderedDict(sorted(specinfo.items(),key=lambda x:x[1]['stime']))
+  defspfilter=[]
+  if specfilter:
+    [defspfilter.extend(filterfuncs) for iln,filterfuncs in [x for x in list(gggconfig['spectrum.filter.barcos'].items()) if fnmatch.fnmatch((instrument).lower(),x[0])]]
+    if len(defspfilter):
+      logger.info('the spectra is filtered with spectrum.filter.barcos')
+      filterlist,badlist=filterspectra(specinfo,spfilter=defspfilter,logger=logger)
+      try: filterlist,badlist=filterspectra(specinfo,spfilter=defspfilter,logger=logger)
+      except Exception as e: logger.warning('No barcos data found: %s'%repr(e));badlist=[]
+      else: trackingmask=array([s not in filterlist for s in specinfo],dtype=bool);#badlist=[]
+      if len(badlist):
+        for badspec in badlist: 
+          del specinfo[badspec]
+  return OrderedDict(sorted(specinfo.items(),key=lambda x:x[1]['stime']))
 
 
 def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,logger=rootlogger):
@@ -199,6 +247,7 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,logger=rootlogger
   alt = gggconfig[instrument]['alt']
   filelist = create_filelist(instrument, stime,etime)
   if not len(filelist): logger.warning('There is no spectra between %s and %s'%(stime,etime)); return 1
+  pro = gggconfig[instrument]['pro']
   subprocess.call('ln -sf %s %s'%(os.path.join(gggconfig['ggg2020.config']['i2s_temp_folder'],'flimit.i2s*%s'%pro), outpath),shell=True)
   listcommand = os.path.join(outpath,stime.strftime('%Y%m%d')+'_'+etime.strftime('%Y%m%d')+'_list_of_commands.txt')  
   i2s_in_days=[]
@@ -218,6 +267,8 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,logger=rootlogger
       with open(i2stemp,'r+') as fid : lines  = fid.readlines()
       raw_data = os.path.dirname(filelist[0])+'/'
       i2s_spectra_output = './%s/'%(spectype)+mtime.strftime('%Y/%m')+'/' 
+      oldfiles = glob.glob(os.path.join(i2s_spectra_output,mtime.strftime(gggconfig[instrument]['i2sfmt']))+'*')
+      if len(oldfiles): commandstar('rm %s'%(os.path.join(i2s_spectra_output,mtime.strftime(gggconfig[instrument]['i2sfmt']))+'*')) ### remove the previous spectra
       if not os.path.isdir(i2s_spectra_output): subprocess.call('mkdir -p %s'%i2s_spectra_output, shell=True)
       i2s_in_daily = os.path.join(outpath,mtime.strftime('opus_i2s_%Y%m%d.in'))
       for folder in ('input','log','command'):
@@ -273,8 +324,43 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,logger=rootlogger
     subprocess.call('mv *.out ./log',shell=True)
     subprocess.call('mv *commands.txt ./command',shell=True)  
     logger.info('I2S has finished !')
+    ### change the access
+    days=0
+    while stime+dt.timedelta(days) <= etime:
+      mtime = stime+dt.timedelta(days)
+      newfiles = glob.glob(os.path.join(i2s_spectra_output,mtime.strftime(gggconfig[instrument]['i2sfmt']))+'*')
+      if len(newfiles): commandstar('chmod 660 %s'%(os.path.join(i2s_spectra_output,mtime.strftime(gggconfig[instrument]['i2sfmt']))+'*')) ### remove the previous spectra
+      days += 1 ## each time one 
+  ### return the speclist after i2s and the meteo info
+  out = OrderedDict()
+  while stime <= etime:  
+    i2s_spectra_output = './%s/'%(spectype)+stime.strftime('%Y/%m')+'/' 
+    files = glob.glob(os.path.join(i2s_spectra_output,stime.strftime(gggconfig[instrument]['i2sfmt']))+'*')
+    if not len(files): stime += dt.timedelta(1) ; continue
+    filelist = create_filelist(instrument, stime) ## raw spectra
+    infile = './input/'+stime.strftime('opus_i2s_%Y%m%d.in')
+    specinfo = get_spec_info(instrument,filelist,logger=logger)
+
+    for f in sorted(files):
+      basef = os.path.basename(f)
+      out[basef]={}
+      nk = int(basef.split('.')[-1]) if mod(int(basef.split('.')[-1]),2) else int(basef.split('.')[-1])-1
+      fid = open(infile,'r')
+      for line in fid:
+        if ':' in line: continue
+        if len(line.split())<10 : continue
+        if line.split()[4] == str(nk) and stime.strftime(gggconfig[instrument]['specfmt']) in line:
+          for key in specinfo[line.split()[0]].keys(): 
+            out[basef][key] = specinfo[line.split()[0]][key]
+          break
+      fid.close()
+      #print (os.path.abspath(f))
+      out[basef]['file']=os.path.abspath(f)
+      out[basef]['fsf']=0.99999999
+      out[basef]['lasf']=15798.014   ### fixed ? ### TBD
+
     ### add the i2s folder to config/data_list
-    i2s_spectra_output = os.path.abspath(i2s_spectra_output)+'/'
+    i2s_spectra_output = os.path.dirname(out[basef]['file'])+'/'
     with open(os.path.join(gggconfig['ggg2020.config']['gggpath'],'config/data_part_list_maker.lst'),'r') as f: 
       lines = ''.join(f.readlines())
       if i2s_spectra_output not in lines:
@@ -285,31 +371,6 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,logger=rootlogger
       if i2s_spectra_output not in lines:
         with open(os.path.join(gggconfig['ggg2020.config']['gggpath'],'config/data_part.lst'),'a+') as fid: 
           fid.write(i2s_spectra_output+'\n')
-  ### return the speclist after i2s and the meteo info
-  out = OrderedDict()
-  while stime <= etime:  
-    i2s_spectra_output = './%s/'%(spectype)+stime.strftime('%Y/%m')+'/' 
-    files = glob.glob(os.path.join(i2s_spectra_output,stime.strftime(gggconfig[instrument]['i2sfmt']))+'*')
-    if not len(files): stime += dt.timedelta(1) ; continue
-    filelist = create_filelist(instrument, stime) ## raw spectra
-    infile = './input/'+stime.strftime('opus_i2s_%Y%m%d.in')
-    specinfo = get_spec_info(instrument,filelist,logger=logger)
-    for f in sorted(files):
-      basef = os.path.basename(f)
-      out[basef]={}
-      nk = int(basef.split('.')[-1]) if mod(int(basef.split('.')[-1]),2) else int(basef.split('.')[-1])-1
-      fid = open(infile,'r')
-      for line in fid:
-        if ':' in line: continue
-        if len(line.split())<10 : continue
-        if line.split()[4] == str(nk) and stime.strftime(gggconfig[instrument]['specfmt']) in line:
-          out[basef] = specinfo[line.split()[0]]
-          break
-      fid.close()
-      out[basef]['file']=os.path.abspath(f)
-      #tmp = o.Opus(out[basef]['file']); tmp.get_data();
-      out[basef]['fsf']=0.99999999
-      out[basef]['lasf']=15798.014   ### fixed ? ### TBD
     stime += dt.timedelta(1)   
   return out
   
@@ -338,8 +399,8 @@ def create_mod(instrument,stime,etime,logger=rootlogger):
       subprocess.call('tar zxvf %s'%gzfile,shell=True)
       subprocess.call('rm %s'%gzfile,shell=True)
     ## move these files to good position 
-    commandstar('chmod 775 ./*.mod; mv ./*.mod $GGGPATH/models/gnd')
-    commandstar('chmod 775 ./*.vmr; mv ./*.vmr $GGGPATH/vmrs/gnd')
+    commandstar('chmod 660 ./*.mod; mv ./*.mod $GGGPATH/models/gnd')
+    commandstar('chmod 660 ./*.vmr; mv ./*.vmr $GGGPATH/vmrs/gnd')
     commandstar('cat links.txt >> finish.txt')
   elif 'maido' in instrument:
     ## although maido is not the standard TCCON site, we can use the stdenis a priori data for maido site
@@ -349,8 +410,8 @@ def create_mod(instrument,stime,etime,logger=rootlogger):
       subprocess.call('tar zxvf %s'%gzfile,shell=True)
       subprocess.call('rm %s'%gzfile,shell=True)
     ## move these files to good position 
-    commandstar('chmod 775 ./*.mod; mv ./*.mod $GGGPATH/models/gnd')
-    commandstar('chmod 775 ./*.vmr; mv ./*.vmr $GGGPATH/vmrs/gnd')
+    commandstar('chmod 660 ./*.mod; mv ./*.mod $GGGPATH/models/gnd')
+    commandstar('chmod 660 ./*.vmr; mv ./*.vmr $GGGPATH/vmrs/gnd')
     commandstar('cat links.txt >> finish.txt')
   else:
     ### the outside the TCCON community should download the GFIP a priori data yourself
@@ -391,7 +452,7 @@ def create_gop(instrument,speclist,stime,etime, logger=rootlogger):
     speclist[i2spt]['SIA'],speclist[i2spt]['FVSI'],speclist[i2spt]['WSPD'], speclist[i2spt]['WDIR'],\
     '','',gggconfig[instrument]['nus'],'',gggconfig[instrument]['nue'],'',0.9999990,speclist[i2spt]['LWN'],9900.0,'.',0.002,1.0)
     with open(gopfile,'a') as f: f.write(line+'\n')   
-  commandstar('chmod 775 %s'%gopfile)
+  commandstar('chmod 660 %s'%gopfile)
   logger.info('finished gop created')
   return gopfile  
 
@@ -426,11 +487,15 @@ def run_grl(instrument='bruker125hr@xianghe',stime=None,etime=None,gopfile=None,
 def _clean(stime,etime,pro):
   ## clean the files after GFIT running
   lsefile = os.path.join(gggpath,'lse/gnd','%s%s_%s.lse'%(pro,stime.strftime('%Y%m%d'),etime.strftime('%Y%m%d')))
-  if os.path.isfile(lsefile): os.remove(lsefile)
-
+  if os.path.isfile(lsefile): commandstar('chmod 660 %s'%lsefile)
+  grlfile = os.path.join(gggpath,'runlogs/gnd','%s%s_%s.grl'%(pro,stime.strftime('%Y%m%d'),etime.strftime('%Y%m%d')))
+  if os.path.isfile(grlfile): commandstar('chmod 660 %s'%grlfile)
   
 
 def disable_spt():
+  """
+  do not save the spt during thg gfit running
+  """
   for f in glob.glob('*.ggg'):
     fid = open(f,'r')
     lines = fid.readlines()
@@ -494,6 +559,7 @@ def main(instrument='bruker125hr@xianghe',stime=None,etime=None,skipmod=False,sk
     except KeyboardInterrupt: raise KeyboardInterruptError()
     logger.info('running post processing ...')
     subprocess.call('bash post_processing.sh',shell=True)
+    _clean(stime,etime,pro)
     
 
 #if __name__ == '__main__':

@@ -160,7 +160,7 @@ def get_spec_info(instrument,file_list,specfilter=True,logger=rootlogger):
       specinfo[basef]['SIA'] = 2190.0 
       specinfo[basef]['FVSI'] = 0.0074
       bfile = os.path.join(specinfo[basef]['date'].strftime(gggconfig[instrument]['barcos']),specinfo[basef]['date'].strftime('%Y%m%d.hdf'))
-      if not os.path.isfile(bfile): logger.error('The barcos file is missing: %s'%bfile); return 1
+      if not os.path.isfile(bfile): logger.error('The barcos file is missing: %s'%bfile); del specinfo[basef]; continue
       fid = h5py.File(bfile,'r')
       #print (fid['OpusFileOriginal'][...][0])
       specs = [x.decode('utf-8').strip().split('/')[-1] for x in fid['OpusFileOriginal'][...]]
@@ -416,6 +416,7 @@ def create_mod(instrument,stime,etime,quiet=True,logger=rootlogger):
     commandstar('cat links.txt >> finish.txt')
   else:
     ### the outside the TCCON community should download the GFIP a priori data yourself
+    raise('you need to download the a priori profile by your self.')
     pass
     
 def create_gop(instrument,speclist,stime,etime, logger=rootlogger):
@@ -506,7 +507,8 @@ def disable_spt():
     fid.writelines(lines)
     fid.close()    
 
-def main(instrument='bruker125hr@xianghe',stime=None,etime=None,skipmod=False,skipi2s=False,npool=8,simulation=True,savespt=False,windows=1,logger=rootlogger):
+def main(instrument='bruker125hr@xianghe',stime=None,etime=None,skipmod=False,skipi2s=False,npool=8,simulation=True, quiet=True,
+    savespt=False,windows=None,logger=rootlogger):
   """run the gggcode
      arguments:
       -instrument  such as 'bruker125hr@xianghe'
@@ -533,14 +535,14 @@ def main(instrument='bruker125hr@xianghe',stime=None,etime=None,skipmod=False,sk
   """
   instrument = instrument.lower()
   if check_strategy(instrument): return 1
-  windows = gggconfig[instrument].get('windows',windows)
+  if not windows: windows = gggconfig[instrument].get('windows',windows)
   global gggpath, pro , lat, lon, alt
   gggpath = gggconfig['ggg2020.config']['gggpath']; pro = gggconfig[instrument]['pro']
   ### step 1: run I2S 
   speclist=i2s(instrument,stime,etime,npool=npool,skipi2s=skipi2s)
   if not len(list(speclist.keys())): logger.warning('no spectra found'); return 1
   ### step 2: prepare mod files ## a priori data
-  if not skipmod: create_mod(instrument,stime,etime)
+  if not skipmod: create_mod(instrument,stime,etime, quiet=quiet)
   ### step 3: prepare gop file
   gopfile = create_gop(instrument,speclist,stime,etime)
   logger.info('create gopfile %s'%gopfile)

@@ -9,6 +9,11 @@ from numpy import *
 import logging,os,glob
 import xarray as xr
 import datetime as dt
+from ftir.tools import sort_data_by_timeunit
+from bira3.ch4_sodan import get_collocated_data
+import ftir.trend as tr
+from ftir.val.cams import divar
+import datetime
 
 
 rootlogger=logging.getLogger(__name__)
@@ -45,21 +50,6 @@ def create_ggg2020_retrieve_plot(f,plots=['spc','ak']):
   plt.setp(axdiff.get_xticklabels(),visible=False)
     #fig.savefig('/home/minqiang/projects/FTIR/retrievals/working/minqiang/ggg2020/maido/bruker125hr/20190420_20190421/plots/%s.png'%os.path.basename(f),dpi=300)
 
-def plot_ak(f,plots=['spc','ak']):
-  fid = open(f,'r')
-  kp=[]; lk=[]
-  for i,line in enumerate(fid):
-    if i == 0: nk, np, nm = [int(x) for x in line.split()]
-    elif i <= np: kp.append(line.split());
-    elif i == np+1: nk, nl = [int(x) for x in line.split()]
-    elif i <= np+nl+1 : lk.append(line.split())
-    else: break
-  kp = array(kp,dtype=float)
-  lk = array(lk,dtype=float)
-  ak = kp.dot(lk.transpose())
-  print (ak)
-
-
 
 def diagnose_nc(fpath,logger=rootlogger):
   ### diagnose the ggg2020 outputs
@@ -89,7 +79,8 @@ def diagnose_nc(fpath,logger=rootlogger):
     label.set_rotation(45)
 
 
-def plot_vav_co2(f):
+def plot_vav_co2(f,M):
+
   fid = open(f,'r')
   mtime=[]; 
   air =[]; co2=[]; co2_err=[]
@@ -110,7 +101,45 @@ def plot_vav_co2(f):
   xco2 = array(co2)/array(air)*1e6
   xco2_err = array(co2_err)/array(air)*1e6
   mtime = array(mtime)
-  ax.plot(mtime[xco2_err<4],xco2[xco2_err<4],'ko')
+  ax.plot(mtime[xco2_err<3],xco2[xco2_err<3],'ko',label='Maido W4790')
+  ax.plot(M['TCCON']['time'],M['TCCON']['xco2_ppm'],'ro',label='Stdenis TCCON')
+  ax.legend()
+  ax.set_ylabel('XCO2 [ppm]')
+  #ax.set_xlim(dt.datetime(2013,1,1),dt.datetime(2015,1,1))
+  
+  indx = where((M['TCCON']['time']>dt.datetime(2013,1,1))&(M['TCCON']['time']<dt.datetime(2015,1,1)))
+  
+  ## box plot
+  fig1, ax1 = plt.subplots()
+  ax1.set_title('Box plot')
+  data=[xco2[xco2_err<3], M['TCCON']['xco2_ppm'][indx]]
+  ax1.boxplot(data)
+  ax1.set_xticklabels(['Maido','Stdenis'])
+  
+  ## dirunal variation
+  fig=plt.figure(figsize=(6,5))
+  ax=fig.add_axes([0.12,0.1,0.8,0.8])
+  color='r'
+  t_f,d_f,d_f_std,diff_f,diff_f_std,idx_f=divar(M['TCCON']['time'][indx],M['TCCON']['xco2_ppm'][indx])
+  t_f = [datetime.datetime(2000,1,1)+x for x in array(t_f) - datetime.datetime(t_f[0].year,t_f[0].month,t_f[0].day)]
+  temp=diff_f[-4:];diff_f[4:]=diff_f[0:-4] ;diff_f[0:4]=temp
+  temp=diff_f_std[-4:];diff_f_std[4:]=diff_f_std[0:-4] ;diff_f_std[0:4]=temp
+  ax.plot(t_f,diff_f,color=color,linewidth=2.5);ax.fill_between(t_f,diff_f-diff_f_std,diff_f+diff_f_std,where=~isnan(diff_f_std),alpha=0.7,facecolor=color,color=color,label='Stdenis')
+  color='k'
+  t_f,d_f,d_f_std,diff_f,diff_f_std,idx_f=divar(mtime[xco2_err<3],xco2[xco2_err<3])
+  t_f = [datetime.datetime(2000,1,1)+x for x in array(t_f) - datetime.datetime(t_f[0].year,t_f[0].month,t_f[0].day)]
+  temp=diff_f[-4:];diff_f[4:]=diff_f[0:-4] ;diff_f[0:4]=temp
+  temp=diff_f_std[-4:];diff_f_std[4:]=diff_f_std[0:-4] ;diff_f_std[0:4]=temp
+  ax.plot(t_f,diff_f,color=color,linewidth=2.5);ax.fill_between(t_f,diff_f-diff_f_std,diff_f+diff_f_std,where=~isnan(diff_f_std),alpha=0.7,facecolor=color,color=color,label='Maido')
+  ax.set_ylabel('$\Delta$ XCO2 [ppm]')
+  ax.legend()
+  
+  ## relationship
+  t1,data1,std1=sort_data_by_timeunit(mtime[xco2_err<3],xco2[xco2_err<3],day=1,unit='days',std=True)  #'hours'
+  t2,data2,std2=sort_data_by_timeunit(M['TCCON']['time'][indx],M['TCCON']['xco2_ppm'][indx],day=1,unit='days',std=True)  
+  t,d1,d2,s1,s2 = get_collocated_data(t1,t2,data1,data2,std1=std1,std2=std2)  
+  tr.plot_scatters(d2,d1,s2,s1,figsize=(4,3),title='',xlabel='Stdenis XCO2 [ppm]',ylabel='Maido XCO2 [ppm]',onetooneflag=True,color='k',same_scale=True,crosszero=True)        
+
    
 
 

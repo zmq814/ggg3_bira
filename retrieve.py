@@ -19,6 +19,8 @@ import subprocess
 rootlogger=logging.getLogger(__name__)
 from importlib import reload
 import fnmatch,time
+import string
+import random
 
 
 #### BASIC FUNCTIONS AND CLASSES
@@ -216,6 +218,19 @@ def get_spec_info(instrument,file_list,specfilter=True,logger=rootlogger):
   return OrderedDict(sorted(specinfo.items(),key=lambda x:x[1]['stime']))
 
 
+def relocate():
+  ### relocate the i2s spectra on yyyy/mm/dd structure
+  fs = glob.glob('/bira-iasb/projects/FTIR/retrievals/data/i2s/maido/bruker125hr/f7/*/*/ma*')
+  #fs = glob.glob('/bira-iasb/projects/FTIR/retrievals/data/i2s/stdenis/bruker125hr/tccon_dual/*/*/ra*')
+  for f in fs:
+    fname = os.path.basename(f); outpath = os.path.join(os.path.dirname(f),fname[8:10])
+    ftarget = os.path.join(outpath,fname)
+    if not os.path.isdir(outpath): commandstar('mkdir -p %s; chmod -R 775 %s'%(outpath,outpath))
+    commandstar('mv %s %s'%(f,ftarget))
+
+
+
+
 def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,logger=rootlogger):
   """
   prepare all the input files before the i2s run and lauch the jobs
@@ -255,8 +270,11 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,logger=rootlogger
   MNYMXY_DC = gggconfig['i2s.input']['mnymxy_dc']
   specinfo=None
   os.chdir(outpath)
+  def _random_string(length):
+    ### generate a random string
+    return ''.join(random.choice(string.ascii_letters) for m in arange(length))
   if not skipi2s:
-    ###  craete the i2s.in for each day
+    ###  craete the i2s.in for each day <the preivous i2s spectra will be removed!>
     days=0
     while stime+dt.timedelta(days) <= etime:
       mtime = stime+dt.timedelta(days)
@@ -266,9 +284,9 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,logger=rootlogger
       ### read the template i2s input and generate a new one
       with open(i2stemp,'r+') as fid : lines  = fid.readlines()
       raw_data = os.path.dirname(filelist[0])+'/'
-      i2s_spectra_output = './%s/'%(spectype)+mtime.strftime('%Y/%m')+'/' 
-      oldfiles = glob.glob(os.path.join(i2s_spectra_output,mtime.strftime(gggconfig[instrument]['i2sfmt']))+'*')
-      if len(oldfiles): commandstar('rm %s'%(os.path.join(i2s_spectra_output,mtime.strftime(gggconfig[instrument]['i2sfmt']))+'*')) ### remove the previous spectra
+      i2s_spectra_output = './%s/'%(spectype)+mtime.strftime('%Y/%m/%d')+'/' 
+      ### remove the previous spectra
+      commandstar('rm -rf %s'%i2s_spectra_output)
       if not os.path.isdir(i2s_spectra_output): commandstar('mkdir -p %s; chmod -R 775 %s'%(i2s_spectra_output,i2s_spectra_output))
       i2s_in_daily = os.path.join(outpath,mtime.strftime('opus_i2s_%Y%m%d.in'))
       for folder in ('input','log','command'):
@@ -333,8 +351,10 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,logger=rootlogger
       days += 1 ## each time one 
   ### return the speclist after i2s and the meteo info
   out = OrderedDict()
+  tempstring= _random_string(5)
+  speclogfile = os.path.join(gggconfig['ggg2020.config']['gggpath'],'config/data_part.lst') ## this is hard coded in the ggg2020
   while stime <= etime:  
-    i2s_spectra_output = './%s/'%(spectype)+stime.strftime('%Y/%m')+'/' 
+    i2s_spectra_output = './%s/'%(spectype)+stime.strftime('%Y/%m/%d')+'/' 
     files = glob.glob(os.path.join(i2s_spectra_output,stime.strftime(gggconfig[instrument]['i2sfmt']))+'*')
     if not len(files): stime += dt.timedelta(1) ; continue
     filelist = create_filelist(instrument, stime) ## raw spectra
@@ -361,16 +381,11 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,logger=rootlogger
 
     ### add the i2s folder to config/data_list
     i2s_spectra_output = os.path.dirname(out[basef]['file'])+'/'
-    with open(os.path.join(gggconfig['ggg2020.config']['gggpath'],'config/data_part_list_maker.lst'),'r') as f: 
+    with open(speclogfile,'r') as f: 
       lines = ''.join(f.readlines())
       if i2s_spectra_output not in lines:
-        with open(os.path.join(gggconfig['ggg2020.config']['gggpath'],'config/data_part_list_maker.lst'),'a+') as fid: 
-          fid.write(i2s_spectra_output+'\n')
-    with open(os.path.join(gggconfig['ggg2020.config']['gggpath'],'config/data_part.lst'),'r') as f: 
-      lines = ''.join(f.readlines())
-      if i2s_spectra_output not in lines:
-        with open(os.path.join(gggconfig['ggg2020.config']['gggpath'],'config/data_part.lst'),'a+') as fid: 
-          fid.write(i2s_spectra_output+'\n')
+        with open(speclogfile,'a+') as f: 
+          f.write(i2s_spectra_output+'\n')
     stime += dt.timedelta(1)   
   return out
   
@@ -486,23 +501,28 @@ def run_grl(instrument='bruker125hr@xianghe',stime=None,etime=None,gopfile=None,
   with open('gsetup.input','w')as f: f.write('g\n%s\n5\n%d\ny\n'%(str(k),windows))
   subprocess.call("$GGGPATH/bin/gsetup < gsetup.input",shell=True)
   
-def _clean(stime,etime,pro):
+def _clean(stime,etime,pro,logger=rootlogger):
   ## clean the files after GFIT running
+  logger=getlogger(logger,'_clean')
+  logger.info('clean some not useful files')
   lsefile = os.path.join(gggpath,'lse/gnd','%s%s_%s.lse'%(pro,stime.strftime('%Y%m%d'),etime.strftime('%Y%m%d')))
   if os.path.isfile(lsefile): commandstar('chmod 660 %s'%lsefile)
   grlfile = os.path.join(gggpath,'runlogs/gnd','%s%s_%s.grl'%(pro,stime.strftime('%Y%m%d'),etime.strftime('%Y%m%d')))
   if os.path.isfile(grlfile): commandstar('chmod 660 %s'%grlfile)
+
   
 
-def disable_spt():
+def change_gggfile(savespt=False):
   """
-  do not save the spt during thg gfit running
+  optional arguments
+    save the spt during thg gfit running or not
   """
   for f in glob.glob('*.ggg'):
     fid = open(f,'r')
     lines = fid.readlines()
     for il, line in enumerate(lines):
-      if 'spt/z' in line: lines[il] =  lines[il].strip() +' 0\n'
+      if savespt:
+        if 'spt/z' in line: lines[il] =  lines[il].strip() +' 0\n'
     fid = open(f,'w')
     fid.writelines(lines)
     fid.close()    
@@ -553,8 +573,8 @@ def main(instrument='bruker125hr@xianghe',stime=None,etime=None,skipmod=False,sk
   logger.info('wkdir = %s'%wkdir)
   ### step 5: run grl 
   run_grl(instrument,stime,etime,gopfile,windows)
-  ### disable the spectral output
-  if not savespt: disable_spt()
+  ### change the data_part and disable the spectral output (F/T)
+  change_gggfile(savespt=savespt)
   ### step 6: run gfit 
   if not simulation:
     logger.info('running GFIT ...')

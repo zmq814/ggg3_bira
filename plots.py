@@ -14,6 +14,7 @@ from bira3.ch4_sodan import get_collocated_data
 import ftir.trend as tr
 from ftir.val.cams import divar
 import datetime
+from matplotlib.dates import DateFormatter
 
 
 rootlogger=logging.getLogger(__name__)
@@ -141,5 +142,92 @@ def plot_vav_co2(f,M):
   tr.plot_scatters(d2,d1,s2,s1,figsize=(4,3),title='',xlabel='Stdenis XCO2 [ppm]',ylabel='Maido XCO2 [ppm]',onetooneflag=True,color='k',same_scale=True,crosszero=True)        
 
    
+def plot_vav_co2_zco2(fs):
+  badlist = '/bira-iasb/projects/FTIR/retrievals/data/i2s/stdenis/bruker125hr/tccon_dual/badlist'
+  badspec = [x.strip() for x in open(badlist,'r').readlines()]
+  print (badspec)
+  if type(fs) == str: fs = [fs,]
+  mtime=[]; 
+  air =[]; zco2=[]; zco2_err=[];co2=[]; co2_err=[];o2=[]; o2_err=[];names=[]
+  for f in fs:
+    fid = open(f,'r')
+    for il,line in enumerate(fid): 
+      if il <=6: continue
+      elif il ==7:
+        keys = line.split()
+        indx_zco2 = keys.index('zco2')
+        indx_air = keys.index('luft')
+        indx_co2 = keys.index('co2')
+        indx_o2 = keys.index('o2')
+      else:
+        if line.split()[0] in badspec: continue
+        mtime.append(dt.datetime(int(float(line.split()[1])),1,1)+dt.timedelta(float(line.split()[2])-1))
+        zco2.append(float(line.split()[indx_zco2]))
+        zco2_err.append(float(line.split()[indx_zco2+1]))    
+        co2.append(float(line.split()[indx_co2]))
+        co2_err.append(float(line.split()[indx_co2+1]))    
+        o2.append(float(line.split()[indx_o2]))
+        o2_err.append(float(line.split()[indx_o2+1]))     
+        air.append(float(line.split()[indx_air]))
+        names.append(line.split()[0])
+  fid.close()
+  fig=plt.figure(figsize=(8,4))
+  ax=plt.axes([.15,0.15,.75,.7])
+  xzco2 = array(zco2)/array(air)*1e6
+  xzco2_err = array(zco2_err)/array(air)*1e6
+  xco2 = array(co2)/array(air)*1e6
+  xco2_err = array(co2_err)/array(air)*1e6
+  xco2_o2 = array(co2)/array(o2)*1e6*0.2095
+  xo2_err = array(o2_err)/array(air)
+  mtime = array(mtime)
+  ax.plot(mtime,xzco2,'ko',label='W4790')
+  #ax.plot(mtime[xco2_err<5],xco2[xco2_err<5],'ro',label='W6300')  
+  line, = ax.plot(mtime,xco2,'ro',label='W6300',picker=5)  
+  ax.legend()
+  ax.set_ylabel('XCO2 [ppm]')
 
+
+  def onpick(event):
+      if event.artist!=line: return True
+      N = len(event.ind)
+      if not N: return True
+      for subplotnum, dataind in enumerate(event.ind):
+        print (names[dataind])
+      return True
+  def click(event):
+    print (event.xdata)
+
+  fig.canvas.mpl_connect('pick_event', onpick)
+  #fig.canvas.mpl_connect('button_release_event', click) 
+  ## box plot
+  fig1, ax1 = plt.subplots()
+  ax1.set_title('Box plot')
+  data=[xzco2,xco2]
+  ax1.boxplot(data)
+  ax1.set_xticklabels(['w4790','w6300'])
+  
+  ## dirunal variation
+  fig=plt.figure(figsize=(6,5))
+  ax=fig.add_axes([0.12,0.1,0.8,0.8])
+  color='k'
+  t_f,d_f,d_f_std,diff_f,diff_f_std,idx_f=divar(mtime, xzco2,fine_unit='minutes:20',coarse_threshold=250)
+  t_f = [datetime.datetime(2000,1,1)+x for x in array(t_f) - datetime.datetime(t_f[0].year,t_f[0].month,t_f[0].day)]
+  ax.plot(t_f,diff_f,color=color,linewidth=2.5);ax.fill_between(t_f,diff_f-diff_f_std,diff_f+diff_f_std,where=~isnan(diff_f_std),alpha=0.7,facecolor=color,color=color,label='w4790')
+  color='r'
+  t_f,d_f,d_f_std,diff_f,diff_f_std,idx_f=divar(mtime, xco2,fine_unit='minutes:20',coarse_threshold=250)
+  t_f = [datetime.datetime(2000,1,1)+x for x in array(t_f) - datetime.datetime(t_f[0].year,t_f[0].month,t_f[0].day)]
+  ax.plot(t_f,diff_f,color=color,linewidth=2.5);ax.fill_between(t_f,diff_f-diff_f_std,diff_f+diff_f_std,where=~isnan(diff_f_std),alpha=0.7,facecolor=color,color=color,label='w6300')
+  myFmt = DateFormatter("%H")
+  ax.xaxis.set_major_formatter(myFmt)
+  ax.set_xlabel('Hours (UTC)')
+  
+  ax.set_ylabel('$\Delta$ XCO2 [ppm]')
+  ax.legend()
+  
+  ## relationship
+  t1,data1,std1=sort_data_by_timeunit(mtime,xzco2,day=1,unit='days',std=True)  #'hours'
+  t2,data2,std2=sort_data_by_timeunit(mtime,xco2,day=1,unit='days',std=True)  
+  t,d1,d2,s1,s2 = get_collocated_data(t1,t2,data1,data2,std1=std1,std2=std2)  
+  tr.plot_scatters(d2,d1,s2,s1,figsize=(4,3),title='',xlabel='w6300 XCO2 [ppm]',ylabel='w4790 XCO2 [ppm]',onetooneflag=True,color='k',same_scale=True,crosszero=True)        
+  
 

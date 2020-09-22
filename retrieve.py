@@ -111,7 +111,7 @@ def create_filelist(instrument, start_date, end_date=None):
       _, temp = zip(*sorted(zip( [float(x.split('.')[-1]) for x in temp],temp)))
       file_list.extend(temp)
     del temp  
-  return file_list
+  return file_list 
 
 
 def filterspectra(specinfo,spfilter=[],sublist=None,logger=rootlogger):
@@ -231,7 +231,7 @@ def relocate():
 
 
 
-def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,logger=rootlogger):
+def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,filelist=None,logger=rootlogger):
   """
   prepare all the input files before the i2s run and lauch the jobs
   
@@ -243,6 +243,9 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,logger=rootlogger
       npool  -- the number of pools for multiprocess
       skipi2s -- T/F skip the i2s process if you already run i2s before
   
+  Optional Arguments:
+      filelist  -- OPUS file list before the i2s;  see def create_filelist
+ 
   output:
       speclist ---  <the spectral list after i2s>
   
@@ -260,7 +263,7 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,logger=rootlogger
   lat = gggconfig[instrument]['lat']
   lon = gggconfig[instrument]['lon']
   alt = gggconfig[instrument]['alt']
-  filelist = create_filelist(instrument, stime,etime)
+  if not filelist : filelist = create_filelist(instrument, stime,etime) 
   if not len(filelist): logger.warning('There is no spectra between %s and %s'%(stime,etime)); return 1
   pro = gggconfig[instrument]['pro']
   subprocess.call('ln -sf %s %s'%(os.path.join(gggconfig['ggg2020.config']['i2s_temp_folder'],'flimit.i2s*%s'%pro), outpath),shell=True)
@@ -559,8 +562,10 @@ def main(instrument='bruker125hr@xianghe',stime=None,etime=None,skipmod=False,sk
   global gggpath, pro , lat, lon, alt
   gggpath = gggconfig['ggg2020.config']['gggpath']; pro = gggconfig[instrument]['pro']
   ### step 1: run I2S 
+  filelist = create_filelist(instrument, stime,etime)
+  if not len(filelist): logger.warning('no spectra found'); return 1
   speclist=i2s(instrument,stime,etime,npool=npool,skipi2s=skipi2s)
-  if not len(list(speclist.keys())): logger.warning('no spectra found'); return 1
+  if not len(list(speclist.keys())): logger.warning('no i2s spectra found'); return 1
   ### step 2: prepare mod files ## a priori data
   if not skipmod: create_mod(instrument,stime,etime, quiet=quiet)
   ### step 3: prepare gop file
@@ -575,6 +580,7 @@ def main(instrument='bruker125hr@xianghe',stime=None,etime=None,skipmod=False,sk
   run_grl(instrument,stime,etime,gopfile,windows)
   ### change the data_part and disable the spectral output (F/T)
   change_gggfile(savespt=savespt)
+  
   ### step 6: run gfit 
   if not simulation:
     logger.info('running GFIT ...')
@@ -582,7 +588,12 @@ def main(instrument='bruker125hr@xianghe',stime=None,etime=None,skipmod=False,sk
     except KeyboardInterrupt: raise KeyboardInterruptError()
     logger.info('running post processing ...')
     subprocess.call('bash post_processing.sh',shell=True)
+    output_filelist_dir= os.path.join(wkdir,'../filelists')
+    if not os.path.isdir(output_filelist_dir): commandstar('mkdir -p %s; chmod -R 775 %s'%(output_filelist_dir,output_filelist_dir))
+    output_filelist = os.path.join(output_filelist_dir,'filelist_%s_%s.txt'%(stime.strftime('%Y%m%d'),etime.strftime('%Y%m%d')))
+    commandstar('chmod -R 775 %s'%(output_filelist))
+    with open(output_filelist, 'w') as fid:
+      fid.writelines(filelist)
     _clean(stime,etime,pro)
-    
 
 #if __name__ == '__main__':

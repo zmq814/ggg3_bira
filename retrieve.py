@@ -593,7 +593,7 @@ def main(instrument='bruker125hr@xianghe',stime=None,etime=None,skipmod=False,sk
     output_filelist = os.path.join(output_filelist_dir,'filelist_%s_%s.txt'%(stime.strftime('%Y%m%d'),etime.strftime('%Y%m%d')))
     commandstar('chmod -R 775 %s'%(output_filelist))
     with open(output_filelist, 'w') as fid:
-      fid.writelines(filelist)
+      fid.writelines('\n'.join(filelist)+'\n');
     _clean(stime,etime,pro)
 
 #if __name__ == '__main__':

@@ -524,8 +524,7 @@ def change_gggfile(savespt=False):
     fid = open(f,'r')
     lines = fid.readlines()
     for il, line in enumerate(lines):
-      if savespt:
-        if 'spt/z' in line: lines[il] =  lines[il].strip() +' 0\n'
+      if (not savespt) and ('spt/z' in line): lines[il] =  lines[il].strip() +' 0\n'
     fid = open(f,'w')
     fid.writelines(lines)
     fid.close()    

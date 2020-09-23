@@ -530,14 +530,14 @@ def change_gggfile(savespt=False):
     fid.writelines(lines)
     fid.close()    
 
-def main(instrument='bruker125hr@xianghe',stime,etime,skipmod=False,skipi2s=False,npool=8,simulation=True, quiet=True,
+def main(instrument,stime,etime,skipmod=False,skipi2s=False,npool=8,simulation=True, quiet=True,
     savespt=False,windows=1,logger=rootlogger):
   """run the gggcode
      arguments:
       -instrument  such as 'bruker125hr@xianghe'
       -npool: the number of core, suggest use 8-12 for the local machine
-      -stime: the starttime dt.datetime formate
-      -etime: the endtime dt.datetime formate
+      -stime: the starttime dt.datetime format
+      -etime: the endtime dt.datetime format
       -skipmod: skip the a priorprofile creation; if you already download the mode files
       -skipi2s: skip the i2s; if you already run the i2s before
       -simulation: to run the gfit or not

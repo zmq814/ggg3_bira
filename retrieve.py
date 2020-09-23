@@ -530,8 +530,8 @@ def change_gggfile(savespt=False):
     fid.writelines(lines)
     fid.close()    
 
-def main(instrument='bruker125hr@xianghe',stime=None,etime=None,skipmod=False,skipi2s=False,npool=8,simulation=True, quiet=True,
-    savespt=False,windows=None,logger=rootlogger):
+def main(instrument='bruker125hr@xianghe',stime,etime,skipmod=False,skipi2s=False,npool=8,simulation=True, quiet=True,
+    savespt=False,windows=1,logger=rootlogger):
   """run the gggcode
      arguments:
       -instrument  such as 'bruker125hr@xianghe'
@@ -559,6 +559,7 @@ def main(instrument='bruker125hr@xianghe',stime=None,etime=None,skipmod=False,sk
   instrument = instrument.lower()
   if check_strategy(instrument): return 1
   if not windows: windows = gggconfig[instrument].get('windows',windows)
+  if not windows: raise('ERROR: please set windows')
   global gggpath, pro , lat, lon, alt
   gggpath = gggconfig['ggg2020.config']['gggpath']; pro = gggconfig[instrument]['pro']
   ### step 1: run I2S 

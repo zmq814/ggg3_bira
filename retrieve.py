@@ -148,6 +148,8 @@ def get_spec_info(instrument,file_list,specfilter=True,logger=rootlogger):
   instrument = instrument.lower()
   specinfo = OrderedDict()
   if not instrument in gggconfig: raise('The instrument %s is not defined in the ggg.config'%instrument); return 1
+  tcorr = gggconfig[instrument].get('tcorr',0)
+  psource = gggconfig[instrument].get('pressure',None)
   if 'barcos' in gggconfig[instrument]: 
     for specf in file_list:
       logger.debug('reading parameters from BARCOS file')
@@ -177,8 +179,12 @@ def get_spec_info(instrument,file_list,specfilter=True,logger=rootlogger):
         except: continue   
         ### compute_snr(instrument)    
       indx = specs.index(basef)
+      pflag = 'Meteo/P'
+      if psource:
+        _a=[x.strip().split(',') for x in psource.split(';')]
+        pflag=list(filter(lambda x: x[0] <= specinfo[basef]['date'].strftime('%Y%m%d'), _a))[-1][-1].strip()
       specinfo[basef]['Pins'] = fid['Inst']['PRS'][...][indx]
-      specinfo[basef]['Pout'] = fid['Meteo/P']['Average'][...][indx]
+      specinfo[basef]['Pout'] = fid[pflag]['Average'][...][indx]
       specinfo[basef]['Tins'] = fid['Inst']['TSC'][...][indx]
       specinfo[basef]['Tout'] = fid['Meteo/T']['Average'][indx]
       specinfo[basef]['Hins'] = 0.0 ### no detector inside the instrument for the humidity ### TBD
@@ -190,6 +196,7 @@ def get_spec_info(instrument,file_list,specfilter=True,logger=rootlogger):
       specinfo[basef]['stime']= specinfo[basef]['date']+(dt.datetime(1,1,1,*fid['StartTime'][indx])-dt.datetime(1,1,1)) 
       specinfo[basef]['SNR']= fid['Spectra']['SNR'][indx]
       specinfo[basef]['LWN']= fid['Inst']['LWN'][indx]
+      specinfo[basef]['Tcorr'] = tcorr+fid['CorrectTime'][...][indx] if 'CorrectTime' in fid else tcorr
       for key in ('Pins','Tins','Hins','Pout','Tout','Hout', 'WSPD', 'WDIR'): 
         if not isfinite(specinfo[basef][key]): specinfo[basef][key] = 0 ## default values
   else:
@@ -202,6 +209,7 @@ def get_spec_info(instrument,file_list,specfilter=True,logger=rootlogger):
       specinfo[basef]['SIA'] = 2190.0 
       specinfo[basef]['FVSI'] = 0.0074
       specinfo[basef]['LWN'] =15798.014
+      specinfo[basef]['Tcorr']=tcorr
   #OrderedDict(sorted(specinfo.items(),key=lambda x:x[1]['stime']))
   defspfilter=[]
   if specfilter:
@@ -227,8 +235,6 @@ def relocate():
     ftarget = os.path.join(outpath,fname)
     if not os.path.isdir(outpath): commandstar('mkdir -p %s; chmod -R 775 %s'%(outpath,outpath))
     commandstar('mv %s %s'%(f,ftarget))
-
-
 
 
 def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,filelist=None,logger=rootlogger):
@@ -465,7 +471,7 @@ def create_gop(instrument,speclist,stime,etime, logger=rootlogger):
   for i2spt in flist:
     ### load the meteo info from the i2s input file
     line='{:1s}{:57s}{:1s}{:2d}{:7d}{:1s}{:9.4f}{:10.4f}{:7.3f}{:6.1f}{:8.2f}{:6.1f}{:6.1f}{:8.2f}{:6.1f}{:7.1f}{:7.3f}{:6.1f}{:5.0f}{:1s}{:1s}{:6.0f}{:1s}{:6.0f}{:1s}{:11.8f}{:11.3f}{:6.0f}{:1s}{:7.3f}{:6.2f}'.\
-    format('',os.path.basename(i2spt),'',2,0,'.', \
+    format('',os.path.basename(i2spt),'',2,speclist[i2spt]['Tcorr'],'.', \
     gggconfig[instrument]['lat'],gggconfig[instrument]['lon'],float(gggconfig[instrument]['alt'])*1e-3, \
     speclist[i2spt]['Tins'],speclist[i2spt]['Pins'],speclist[i2spt]['Hins'], \
     speclist[i2spt]['Tout'],speclist[i2spt]['Pout'],speclist[i2spt]['Hout'], \

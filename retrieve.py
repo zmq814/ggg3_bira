@@ -21,6 +21,7 @@ from importlib import reload
 import fnmatch,time
 import string
 import random
+import pandas as pd
 
 
 #### BASIC FUNCTIONS AND CLASSES
@@ -54,6 +55,26 @@ def commandstar(job):
   try: return subprocess.call(job,shell=True)
   except KeyboardInterrupt: raise KeyboardInterruptError()
 
+def subProcRun(fname,quiet=True):
+  """Open a subprocess and return all stdout (NCAR)
+
+  Input argument: list of string (the command to execute and the arguments)"""
+  rtn = subprocess.Popen(fname, stdout=subprocess.PIPE, stderr=subprocess.PIPE,universal_newlines=True )
+  outstr = ''
+  while True:
+    out = rtn.stdout.read(1)
+    if ( out == '' and rtn.poll() != None ):
+      break
+    if out != '':
+      outstr += out
+      if not quiet: sys.stdout.write(out)
+      sys.stdout.flush()
+  stdout, stderr = rtn.communicate()
+  return (outstr,stderr);
+
+
+################## all the subfunctions ##################
+
 def check_strategy(instrument,logger=rootlogger):
   """check if all the requred files are avaiable before running the i2s and gggcode"""
   logger=getlogger(logger,'check_strategy')
@@ -74,8 +95,6 @@ def check_strategy(instrument,logger=rootlogger):
     time.sleep(5)
   return 0
   
-  
-
 def create_filelist(instrument, start_date, end_date=None):
   """ Create a filelist file for the specified site and date range
   If no optional end date is given, today is taken as the end date.
@@ -115,11 +134,10 @@ def create_filelist(instrument, start_date, end_date=None):
 
 
 def filterspectra(specinfo,spfilter=[],sublist=None,logger=rootlogger):
-
   if sublist==None: llist=list(specinfo.keys())
   else: llist=list(sublist)
   if not specinfo: logger.error('Provide a specinfo instance, from get_spec_info');return [],[]
-  logger.info('Using\n\tspfilter=%s'%','.join(list(zip(*spfilter))[1] if len(spfilter) else '-'))
+  logger.debug('Using\n\tspfilter=%s'%','.join(list(zip(*spfilter))[1] if len(spfilter) else '-'))
   lllist=list(llist)
   badspec=[]
   for spec in llist:
@@ -161,8 +179,6 @@ def get_spec_info(instrument,file_list,specfilter=True,logger=rootlogger):
         specinfo[basef][key] = 0 ## default values
       for key in ('SNR',): 
         specinfo[basef][key] = nan ## default values  
-      specinfo[basef]['SIA'] = 2190.0 
-      specinfo[basef]['FVSI'] = 0.0074
       bfile = os.path.join(specinfo[basef]['date'].strftime(gggconfig[instrument]['barcos']),specinfo[basef]['date'].strftime('%Y%m%d.hdf'))
       if not os.path.isfile(bfile): logger.error('The barcos file is missing: %s'%bfile); del specinfo[basef]; continue
       fid = h5py.File(bfile,'r')
@@ -193,12 +209,16 @@ def get_spec_info(instrument,file_list,specfilter=True,logger=rootlogger):
       specinfo[basef]['WDIR'] = fid['Meteo/WindDirection']['Average'][indx]        
       specinfo[basef]['SIA'] = fid['Meteo/Sun']['Average'][indx]  
       specinfo[basef]['FVSI'] = fid['Meteo/Sun']['StandardDeviation'][indx]/fid['Meteo/Sun']['Average'][indx]*1e-2
+      specinfo[basef]['DUR']= (dt.datetime(1,1,1,*fid['EndTime'][indx])-dt.datetime(1,1,1,*fid['StartTime'][indx])).seconds       
       specinfo[basef]['stime']= specinfo[basef]['date']+(dt.datetime(1,1,1,*fid['StartTime'][indx])-dt.datetime(1,1,1)) 
       specinfo[basef]['SNR']= fid['Spectra']['SNR'][indx]
       specinfo[basef]['LWN']= fid['Inst']['LWN'][indx]
       specinfo[basef]['Tcorr'] = tcorr+fid['CorrectTime'][...][indx] if 'CorrectTime' in fid else tcorr
       for key in ('Pins','Tins','Hins','Pout','Tout','Hout', 'WSPD', 'WDIR'): 
         if not isfinite(specinfo[basef][key]): specinfo[basef][key] = 0 ## default values
+      if not isfinite(specinfo[basef]['FVSI']):  specinfo[basef]['FVSI'] = 0.0074
+      if not isfinite(specinfo[basef]['SIA']):  specinfo[basef]['SIA'] = 2190.0
+
   else:
    ####### TBD
     for specf in file_list:
@@ -215,7 +235,7 @@ def get_spec_info(instrument,file_list,specfilter=True,logger=rootlogger):
   if specfilter:
     [defspfilter.extend(filterfuncs) for iln,filterfuncs in [x for x in list(gggconfig['spectrum.filter.barcos'].items()) if fnmatch.fnmatch((instrument).lower(),x[0])]]
     if len(defspfilter):
-      logger.info('the spectra is filtered with spectrum.filter.barcos')
+      logger.debug('the spectra is filtered with spectrum.filter.barcos')
       filterlist,badlist=filterspectra(specinfo,spfilter=defspfilter,logger=logger)
       try: filterlist,badlist=filterspectra(specinfo,spfilter=defspfilter,logger=logger)
       except Exception as e: logger.warning('No barcos data found: %s'%repr(e));badlist=[]
@@ -226,16 +246,15 @@ def get_spec_info(instrument,file_list,specfilter=True,logger=rootlogger):
   return OrderedDict(sorted(specinfo.items(),key=lambda x:x[1]['stime']))
 
 
-def relocate():
-  ### relocate the i2s spectra on yyyy/mm/dd structure
-  fs = glob.glob('/bira-iasb/projects/FTIR/retrievals/data/i2s/maido/bruker125hr/f7/*/*/ma*')
-  #fs = glob.glob('/bira-iasb/projects/FTIR/retrievals/data/i2s/stdenis/bruker125hr/tccon_dual/*/*/ra*')
-  for f in fs:
-    fname = os.path.basename(f); outpath = os.path.join(os.path.dirname(f),fname[8:10])
-    ftarget = os.path.join(outpath,fname)
-    if not os.path.isdir(outpath): commandstar('mkdir -p %s; chmod -R 775 %s'%(outpath,outpath))
-    commandstar('mv %s %s'%(f,ftarget))
-
+#def relocate():
+  #### relocate the i2s spectra on yyyy/mm/dd structure
+  #fs = glob.glob('/bira-iasb/projects/FTIR/retrievals/data/i2s/maido/bruker125hr/f7/*/*/ma*')
+  ##fs = glob.glob('/bira-iasb/projects/FTIR/retrievals/data/i2s/stdenis/bruker125hr/tccon_dual/*/*/ra*')
+  #for f in fs:
+    #fname = os.path.basename(f); outpath = os.path.join(os.path.dirname(f),fname[8:10])
+    #ftarget = os.path.join(outpath,fname)
+    #if not os.path.isdir(outpath): commandstar('mkdir -p %s; chmod -R 775 %s'%(outpath,outpath))
+    #commandstar('mv %s %s'%(f,ftarget))
 
 def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,filelist=None,logger=rootlogger):
   """
@@ -257,7 +276,7 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,filelist=None,log
   
   """
   logger=getlogger(logger,'i2s')
-  logger.info('RUNING i2S ..., and return the specinfo')
+  logger.info('gather specinfo')
   instrument = instrument.lower()
   if not instrument in gggconfig: raise('The instrument %s is not defined in the ggg.config'%instrument); return 1
   spectype =gggconfig[instrument]['spectype']
@@ -284,6 +303,7 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,filelist=None,log
     return ''.join(random.choice(string.ascii_letters) for m in arange(length))
   if not skipi2s:
     ###  craete the i2s.in for each day <the preivous i2s spectra will be removed!>
+    logger.info('Runing I2S ...')
     days=0
     while stime+dt.timedelta(days) <= etime:
       mtime = stime+dt.timedelta(days)
@@ -381,6 +401,7 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,filelist=None,log
         if line.split()[4] == str(nk) and stime.strftime(gggconfig[instrument]['specfmt']) in line:
           for key in specinfo[line.split()[0]].keys(): 
             out[basef][key] = specinfo[line.split()[0]][key]
+            
           break
       fid.close()
       #print (os.path.abspath(f))
@@ -442,8 +463,50 @@ def create_mod(instrument,stime,etime,quiet=True,logger=rootlogger):
     ### the outside the TCCON community should download the GFIP a priori data yourself
     raise('you need to download the a priori profile by your self.')
     pass
-    
-def create_gop(instrument,speclist,stime,etime, logger=rootlogger):
+
+
+def get_si_filter(instrument='bruker125hr@xianghe'):
+  """ filter the spectra due to the Solar intensity 
+  it is applied only for the Xianghe TCCON spectra before 31-05-2019 
+  See Yang et al., 2020 ESSD
+  """
+  badfile = '/bira-iasb/projects/FTIR/retrievals/data/i2s/xianghe/bruker125hr/ingaas/badlist.log'
+  if os.path.isfile(badfile): 
+    fid = open(badfile, 'r')
+    badlist = [x.strip() for x in fid.readlines()]
+    fid.close()
+  else:
+    ## to create the badlist file ### for the first time
+    badlist=[]
+    speclist = i2s(instrument,stime=dt.datetime(2018,6,1),etime=dt.datetime(2019,5,31),npool=8,skipi2s=True,filelist=None)
+    fid=open(badfile,'a+')
+    for spec in list(speclist.keys()):
+      ### load the measurement time of the i2s spectra
+      _temp = o.Opus(speclist[spec]['file']); _temp.get_data()
+      tblock = [x for x in _temp.param if 'TIM' in x][0]
+      stime = dt.datetime.strptime(tblock['DAT']+tblock['TIM'][0:8],'%d/%m/%Y%H:%M:%S')
+      tblock = [x for x in _temp.param if 'DUR' in x][0]
+      etime = stime+dt.timedelta(seconds=tblock['DUR'])
+      ### load the meteo solar intensity data
+      mday = stime
+      if stime.hour>=16: mday = stime + dt.timedelta(1)
+      meteof = os.path.join(mday.strftime(gggconfig[instrument]['data']),'..',stime.strftime('%Y%m%dMeteo125HR.xls'))
+      if not os.path.isfile(meteof): continue ## do nothing
+      else:
+        meteod = pd.read_csv(meteof,skiprows=lambda x: x in range(1,9),delimiter='\t',encoding= 'unicode_escape',usecols=['Time','Sun Direct'])
+        shour = stime.strftime('%H:%M:%S'); ehour = etime.strftime('%H:%M:%S')
+        if shour<ehour: indx = where((meteod['Time']>=shour)&(meteod['Time']<=ehour))[0]
+        else: indx = where((meteod['Time']>=shour)|(meteod['Time']<=ehour))[0]
+        solar = array([float(x.replace(',','.')) for x in meteod['Sun Direct'][indx]])
+        if not len(solar) : continue
+        if len(solar[solar<solar.max()*0.9]): 
+          badlist.append(spec)
+          fid.write('%s\n'%spec)
+      del _temp, meteod
+    fid.close()
+  return badlist
+
+def create_gop(instrument,speclist,stime,etime,sifilter=True, logger=rootlogger):
   """
   create the gop file <be ready for sunrun>
   arguments:
@@ -451,6 +514,8 @@ def create_gop(instrument,speclist,stime,etime, logger=rootlogger):
       -speclist  the dict of spectra after i2s (the key is the )  speclist=i2s(...)
       -stime: the starttime dt.datetime formate
       -etime: the endtime dt.datetime formate
+  optional arguments:
+      -sifilter T/F if instrument = 'bruker125hr@xianghe' and mtime < 2020-06-01; we apply the filter based on the Solar Intensity
   outputs:
       -gopfile 
   """
@@ -466,7 +531,9 @@ def create_gop(instrument,speclist,stime,etime, logger=rootlogger):
     f.write(line1+'\n')
     line2=' Spectrum_File_Name                     Obj   tcorr   oblat   oblon   obalt   tins   pins   hins  tout  pout   hout    sia    fvsi   wspd   wdir   Nus    Nue      FSF      lasf     wavtkr   AIPL   TM'
     f.write(line2+'\n')
-  flist = list(speclist.keys())
+  badlist = []
+  if (instrument =='bruker125hr@xianghe') and sifilter and 'ingaas' in gggconfig[instrument]['spectype']: badlist = get_si_filter()
+  flist = [x for x in list(speclist.keys()) if x not in badlist]
   if not len(flist): logger.info('No spectra left after i2s'); return 1
   for i2spt in flist:
     ### load the meteo info from the i2s input file
@@ -519,8 +586,6 @@ def _clean(stime,etime,pro,logger=rootlogger):
   grlfile = os.path.join(gggpath,'runlogs/gnd','%s%s_%s.grl'%(pro,stime.strftime('%Y%m%d'),etime.strftime('%Y%m%d')))
   if os.path.isfile(grlfile): commandstar('chmod 660 %s'%grlfile)
 
-  
-
 def change_gggfile(savespt=False):
   """
   optional arguments
@@ -534,6 +599,9 @@ def change_gggfile(savespt=False):
     fid = open(f,'w')
     fid.writelines(lines)
     fid.close()    
+
+
+######## main function #######
 
 def main(instrument,stime,etime,skipmod=False,skipi2s=False,npool=8,simulation=True, quiet=True,
     savespt=False,windows=1,logger=rootlogger):
@@ -603,3 +671,4 @@ def main(instrument,stime,etime,skipmod=False,skipi2s=False,npool=8,simulation=T
     _clean(stime,etime,pro)
 
 #if __name__ == '__main__':
+  

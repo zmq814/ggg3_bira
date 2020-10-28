@@ -10,7 +10,6 @@ import logging,os,glob
 import xarray as xr
 import datetime as dt
 from ftir.tools import sort_data_by_timeunit
-from bira3.ch4_sodan import get_collocated_data
 import ftir.trend as tr
 from ftir.val.cams import divar
 import datetime
@@ -19,6 +18,22 @@ from matplotlib.dates import DateFormatter
 
 rootlogger=logging.getLogger(__name__)
 logger=rootlogger
+
+def get_collocated_data(t1,t2,data1,data2,std1=[],std2=[]):
+  """
+  input:
+    t1: array datetime       data1:  array data ; std1: error for data1
+    t2: array datetime       data12:  array data ; std2 : error for data2
+  output:
+    t,d1,d2  
+  """
+  indx1 = in1d(t1,t2);indx2 = in1d(t2,t1)
+  t1=array(t1);t2=array(t2);data1=array(data1,dtype=float32);data2=array(data2,dtype=float32)
+  t=t1[indx1];d1=data1[indx1];d2=data2[indx2]
+  output  = [t,d1,d2]
+  if len(std1):std1=array(std1,dtype=float32);s1=std1[indx1]; output.append(s1)
+  if len(std2):std2=array(std2,dtype=float32);s2=std2[indx2]; output.append(s2)
+  return tuple(output)
 
 def create_ggg2020_retrieve_plot(f,plots=['spc','ak']):
   #fs=glob.glob('/bira-iasb/projects/FTIR/retrievals/operational/tools/ggg2020/spt/*20130412*')

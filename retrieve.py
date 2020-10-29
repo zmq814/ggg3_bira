@@ -314,8 +314,12 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,filelist=None,log
       with open(i2stemp,'r+') as fid : lines  = fid.readlines()
       raw_data = os.path.dirname(filelist[0])+'/'
       i2s_spectra_output = './%s/'%(spectype)+mtime.strftime('%Y/%m/%d')+'/' 
+      i2s_spectra_output_year = './%s/'%(spectype)+mtime.strftime('%Y')+'/' 
+      i2s_spectra_output_month = './%s/'%(spectype)+mtime.strftime('%Y/%m')+'/' 
       ### remove the previous spectra
       commandstar('rm -rf %s'%i2s_spectra_output)
+      if not os.path.isdir(i2s_spectra_output_year): commandstar('mkdir -p %s; chmod -R 775 %s'%(i2s_spectra_output_year,i2s_spectra_output_year))
+      if not os.path.isdir(i2s_spectra_output_month): commandstar('mkdir -p %s; chmod -R 775 %s'%(i2s_spectra_output_month,i2s_spectra_output_month))
       if not os.path.isdir(i2s_spectra_output): commandstar('mkdir -p %s; chmod -R 775 %s'%(i2s_spectra_output,i2s_spectra_output))
       i2s_in_daily = os.path.join(outpath,mtime.strftime('opus_i2s_%Y%m%d.in'))
       for folder in ('input','log','command'):

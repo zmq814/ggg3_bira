@@ -246,6 +246,10 @@ def get_spec_info(instrument,file_list,specfilter=True,logger=rootlogger):
   return OrderedDict(sorted(specinfo.items(),key=lambda x:x[1]['stime']))
 
 
+def _random_string(length):
+  ### generate a random string
+  return ''.join(random.choice(string.ascii_letters) for m in arange(length))
+	
 #def relocate():
   #### relocate the i2s spectra on yyyy/mm/dd structure
   #fs = glob.glob('/bira-iasb/projects/FTIR/retrievals/data/i2s/maido/bruker125hr/f7/*/*/ma*')
@@ -298,9 +302,7 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,filelist=None,log
   MNYMXY_DC = gggconfig['i2s.input']['mnymxy_dc']
   specinfo=None
   os.chdir(outpath)
-  def _random_string(length):
-    ### generate a random string
-    return ''.join(random.choice(string.ascii_letters) for m in arange(length))
+
   if not skipi2s:
     ###  craete the i2s.in for each day <the preivous i2s spectra will be removed!>
     logger.info('Runing I2S ...')
@@ -385,6 +387,7 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,filelist=None,log
   ### return the speclist after i2s and the meteo info
   out = OrderedDict()
   tempstring= _random_string(5)
+  speclinkfolder = os.path.join(gggconfig['ggg2020.config']['gggpath'],'config',tempstring)
   speclogfile = os.path.join(gggconfig['ggg2020.config']['gggpath'],'config/data_part.lst') ## this is hard coded in the ggg2020
   while stime <= etime:  
     i2s_spectra_output = './%s/'%(spectype)+stime.strftime('%Y/%m/%d')+'/' 
@@ -413,15 +416,27 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,filelist=None,log
       out[basef]['fsf']=0.99999999
       out[basef]['lasf']=15798.014   ### fixed ? ### TBD
 
-    ### add the i2s folder to config/data_list
-    i2s_spectra_output = os.path.dirname(out[basef]['file'])+'/'
-    with open(speclogfile,'r') as f: 
-      lines = ''.join(f.readlines())
-      if i2s_spectra_output not in lines:
-        with open(speclogfile,'a+') as f: 
-          f.write(i2s_spectra_output+'\n')
+    # ### add the i2s folder to config/data_list
+    # i2s_spectra_output = os.path.dirname(out[basef]['file'])+'/'
+    # with open(speclogfile,'r') as f: 
+      # lines = ''.join(f.readlines())
+      # if i2s_spectra_output not in lines:
+        # with open(speclogfile,'a+') as f: 
+          # f.write(i2s_spectra_output+'\n')
     stime += dt.timedelta(1)   
-  return out
+  if os.path.isdir(speclinkfolder): commandstar('rm -r %s'%(speclinkfolder))
+  commandstar('mkdir -p %s; chmod -R 775 %s'%(speclinkfolder,speclinkfolder))
+  for basef in out:
+   commandstar('ln -s %s %s'%(out[basef]['file'],speclinkfolder))
+  
+  ### add the i2s folder to config/data_list
+  i2s_spectra_output = speclinkfolder+'/'
+  with open(speclogfile,'r') as f: 
+    lines = ''.join(f.readlines())
+    if i2s_spectra_output not in lines:
+      with open(speclogfile,'a+') as f: 
+        f.write(i2s_spectra_output+'\n')
+  return out,speclinkfolder
   
 def create_mod(instrument,stime,etime,quiet=True,logger=rootlogger):
   """download the a priori profile from the caltech serve
@@ -589,6 +604,18 @@ def _clean(stime,etime,pro,logger=rootlogger):
   if os.path.isfile(lsefile): commandstar('chmod 660 %s'%lsefile)
   grlfile = os.path.join(gggpath,'runlogs/gnd','%s%s_%s.grl'%(pro,stime.strftime('%Y%m%d'),etime.strftime('%Y%m%d')))
   if os.path.isfile(grlfile): commandstar('chmod 660 %s'%grlfile)
+  if os.path.isdir(speclinkfolder): commandstar('rm -r %s'%speclinkfolder)
+  ### remove the link folder in the config/data_list
+  speclogfile = os.path.join(gggconfig['ggg2020.config']['gggpath'],'config/data_part.lst') ## this is hard coded in the ggg2020
+  fid = open(speclogfile,'r')  
+  lines = fid.readlines()
+  newlines=[x for x in lines if not speclinkfolder in x]
+  fid.close()
+  fid = open(speclogfile,'w')  
+  fid.writelines(newlines)
+  fid.close()
+
+  
 
 def change_gggfile(savespt=False):
   """
@@ -638,11 +665,12 @@ def main(instrument,stime,etime,skipmod=False,skipi2s=False,npool=8,simulation=T
   if not windows: windows = gggconfig[instrument].get('windows',windows)
   if not windows: raise('ERROR: please set windows')
   global gggpath, pro , lat, lon, alt
+  global speclinkfolder
   gggpath = gggconfig['ggg2020.config']['gggpath']; pro = gggconfig[instrument]['pro']
   ### step 1: run I2S 
   filelist = create_filelist(instrument, stime,etime)
   if not len(filelist): logger.warning('no spectra found'); return 1
-  speclist=i2s(instrument,stime,etime,npool=npool,skipi2s=skipi2s)
+  speclist,speclinkfolder=i2s(instrument,stime,etime,npool=npool,skipi2s=skipi2s)
   if not len(list(speclist.keys())): logger.warning('no i2s spectra found'); return 1
   ### step 2: prepare mod files ## a priori data
   if not skipmod: create_mod(instrument,stime,etime, quiet=quiet)

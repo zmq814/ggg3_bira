@@ -208,7 +208,7 @@ def get_spec_info(instrument,file_list,specfilter=True,logger=rootlogger):
       specinfo[basef]['WSPD'] = fid['Meteo/WindSpeed']['Average'][indx]  
       specinfo[basef]['WDIR'] = fid['Meteo/WindDirection']['Average'][indx]        
       specinfo[basef]['SIA'] = fid['Meteo/Sun']['Average'][indx]  
-      specinfo[basef]['FVSI'] = fid['Meteo/Sun']['StandardDeviation'][indx]/fid['Meteo/Sun']['Average'][indx]*1e-2
+      specinfo[basef]['FVSI'] = fid['Meteo/Sun']['StandardDeviation'][indx]/fid['Meteo/Sun']['Average'][indx]*1e2
       specinfo[basef]['DUR']= (dt.datetime(1,1,1,*fid['EndTime'][indx])-dt.datetime(1,1,1,*fid['StartTime'][indx])).seconds       
       specinfo[basef]['stime']= specinfo[basef]['date']+(dt.datetime(1,1,1,*fid['StartTime'][indx])-dt.datetime(1,1,1)) 
       specinfo[basef]['SNR']= fid['Spectra']['SNR'][indx]

@@ -12,11 +12,12 @@ import datetime
 import h5py,re
 import py3progressbar as progressbar
 from collections import OrderedDict
-from numpy import *
+from ftir.sfit.tools import calibration
+import ftir.tools as ft
 import ftir.opus as o
+from numpy import *
 import multiprocessing
 import subprocess
-rootlogger=logging.getLogger(__name__)
 from importlib import reload
 import fnmatch,time
 import string
@@ -30,7 +31,30 @@ def getlogger(logger,name):
   try: newlogger=logging.getLogger(logger.name+'.'+name)
   except AttributeError: newlogger=logger
   return newlogger;
+  
+#### BASIC LOGGING SETUP
+logformat='%(asctime)s %(name)s %(levelname)-8s %(message)s'
+logtfmt='%y-%m-%d %H:%M:%S'
+#set the basis configuration for logging to the console 
+logging.basicConfig(level=logging.INFO,format=logformat,datefmt=logtfmt)
+rootlogger=logging.getLogger(__name__) #the root logger goes to the console and to stderr, use stream=sys.stdout to change this
+testlogger=logging.getLogger(rootlogger.name+'.TEST');testlogger.setLevel(logging.DEBUG)
 
+#### SPECIAL LOGGERS 
+import logging.handlers
+
+maillogger=logging.getLogger(rootlogger.name+'.MAIL');maillogger.setLevel(logging.INFO)
+maillogger.addHandler(logging.handlers.SMTPHandler(mailhost=("smtp.oma.be", 25),
+                                            fromaddr="%s@aeronomie.be"%user, 
+                                            toaddrs="%s@aeronomie.be"%user,
+                                            subject="ggg2020 job"))
+oplogger=logging.getLogger(rootlogger.name+'.OPER');oplogger.setLevel(logging.WARNING)
+errlogger=logging.getLogger(rootlogger.name+'.SCHED');errlogger.setLevel(logging.ERROR)
+
+logging.addLevelName( logging.WARNING,  "\033[38;5;202m%s\033[1;0m" % logging.getLevelName(logging.WARNING))
+logging.addLevelName( logging.ERROR,    "\033[1;31m%s\033[1;0m" % logging.getLevelName(logging.ERROR))
+logging.addLevelName( logging.CRITICAL, "\033[1;34m%s\033[1;0m" % logging.getLevelName(logging.CRITICAL))
+logging.addLevelName( logging.DEBUG,    "\033[38;5;244m%s\033[1;0m" % logging.getLevelName(logging.DEBUG))
 
 def applyfunc(f,args,keyargs=False):
   """For multiprocessing, executes a function with a list of arguments
@@ -214,6 +238,9 @@ def get_spec_info(instrument,file_list,specfilter=True,logger=rootlogger):
       specinfo[basef]['SNR']= fid['Spectra']['SNR'][indx]
       specinfo[basef]['LWN']= fid['Inst']['LWN'][indx]
       specinfo[basef]['Tcorr'] = tcorr+fid['CorrectTime'][...][indx] if 'CorrectTime' in fid else tcorr
+      ## calibration surface pressure
+      location=instrument.split('@')[-1];instrid=ft.determine_instrument(instrument='*',location=location)
+      specinfo[basef]['Pout']=calibration(specinfo[basef]['stime'],specinfo[basef]['Pout'],instrid['pressure_calibration'])
       for key in ('Pins','Tins','Hins','Pout','Tout','Hout', 'WSPD', 'WDIR'): 
         if not isfinite(specinfo[basef][key]): specinfo[basef][key] = 0 ## default values
       if not isfinite(specinfo[basef]['FVSI']):  specinfo[basef]['FVSI'] = 0.0074
@@ -373,9 +400,13 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,filelist=None,log
       finally: bar.update(i) 
     ###subprocess.call("parallel -j%s --will-cite < %s"%(npool,listcommand),shell=True)###output spectra data   
     ### mv all the related files to the corresponding folders
-    subprocess.call('chmod 660 *.in; mv *.in ./input',shell=True)
-    subprocess.call('chmod 660 *.out; mv *.out ./log',shell=True)
-    subprocess.call('chmod 660 *commands.txt;mv *commands.txt ./command',shell=True)  
+    days=0
+    while stime+dt.timedelta(days) <= etime:
+      mtime = stime+dt.timedelta(days)
+      subprocess.call('chmod 660 *%s*.in; mv *%s*.in ./input'%(mtime.strftime('%Y%m%d'),mtime.strftime('%Y%m%d')),shell=True)
+      subprocess.call('chmod 660 *%s*.out; mv *%s*.out ./log'%(mtime.strftime('%Y%m%d'),mtime.strftime('%Y%m%d')),shell=True)
+      days +=1
+    subprocess.call('chmod 660 *%s*%s*commands.txt;mv *%s*%s*commands.txt ./command'%(stime.strftime('%Y%m%d'),etime.strftime('%Y%m%d'),stime.strftime('%Y%m%d'),etime.strftime('%Y%m%d')),shell=True)  
     logger.info('I2S has finished !')
     ### change the access
     days=0
@@ -700,7 +731,8 @@ def main(instrument,stime,etime,skipmod=False,skipi2s=False,npool=8,simulation=T
     commandstar('chmod -R 775 %s'%(output_filelist))
     with open(output_filelist, 'w') as fid:
       fid.writelines('\n'.join(filelist)+'\n');
-    _clean(stime,etime,pro)
+  _clean(stime,etime,pro)
+  maillogger.info('%s - %s ggg2020 finished'%(stime.strftime('%Y%m%s'),etime.strftime('%Y%m%d')))
 
 #if __name__ == '__main__':
   

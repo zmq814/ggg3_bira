@@ -403,8 +403,9 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,filelist=None,log
     days=0
     while stime+dt.timedelta(days) <= etime:
       mtime = stime+dt.timedelta(days)
-      subprocess.call('chmod 660 *%s*.in; mv *%s*.in ./input'%(mtime.strftime('%Y%m%d'),mtime.strftime('%Y%m%d')),shell=True)
-      subprocess.call('chmod 660 *%s*.out; mv *%s*.out ./log'%(mtime.strftime('%Y%m%d'),mtime.strftime('%Y%m%d')),shell=True)
+      if len(glob.glob('*%s*.in'%mtime.strftime('%Y%m%d'))):
+        subprocess.call('chmod 660 *%s*.in; mv *%s*.in ./input'%(mtime.strftime('%Y%m%d'),mtime.strftime('%Y%m%d')),shell=True)
+        subprocess.call('chmod 660 *%s*.out; mv *%s*.out ./log'%(mtime.strftime('%Y%m%d'),mtime.strftime('%Y%m%d')),shell=True)
       days +=1
     subprocess.call('chmod 660 *%s*%s*commands.txt;mv *%s*%s*commands.txt ./command'%(stime.strftime('%Y%m%d'),etime.strftime('%Y%m%d'),stime.strftime('%Y%m%d'),etime.strftime('%Y%m%d')),shell=True)  
     logger.info('I2S has finished !')
@@ -417,8 +418,11 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,filelist=None,log
       days += 1 ## each time one 
   ### return the speclist after i2s and the meteo info
   out = OrderedDict()
-  tempstring= _random_string(5)
-  speclinkfolder = os.path.join(gggconfig['ggg2020.config']['gggpath'],'config',tempstring)
+  while 1:
+    tempstring= _random_string(5)
+    speclinkfolder = os.path.join(gggconfig['ggg2020.config']['gggpath'],'config',tempstring)
+    if not os.path.isdir(speclinkfolder): break
+	
   speclogfile = os.path.join(gggconfig['ggg2020.config']['gggpath'],'config/data_part.lst') ## this is hard coded in the ggg2020
   while stime <= etime:  
     i2s_spectra_output = './%s/'%(spectype)+stime.strftime('%Y/%m/%d')+'/' 

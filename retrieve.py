@@ -109,6 +109,9 @@ def check_strategy(instrument,logger=rootlogger):
   if not os.path.isfile(i2stemp):
     logger.error('the I2S template is not existed: %s \n also please chech the flimit.??'%i2stemp)
     return 1
+  #else:
+  #  if os.path.join(gggconfig['ggg2020.config']['i2spath'],'data/i2s',instrument.split('@')[0],)
+  #  commandstar()
   celltemp = os.path.join(gggconfig['ggg2020.config']['gggpath'],'cell_status_info',gggconfig[instrument]['pro']+'_cell_status_info.dat')
   if not os.path.isfile(celltemp):
     logger.error('the cell template is not existed: %s \n '%celltemp)
@@ -206,7 +209,6 @@ def get_spec_info(instrument,file_list,specfilter=True,logger=rootlogger):
       bfile = os.path.join(specinfo[basef]['date'].strftime(gggconfig[instrument]['barcos']),specinfo[basef]['date'].strftime('%Y%m%d.hdf'))
       if not os.path.isfile(bfile): logger.error('The barcos file is missing: %s'%bfile); del specinfo[basef]; continue
       fid = h5py.File(bfile,'r')
-      #print (fid['OpusFileOriginal'][...][0])
       specs = [x.decode('utf-8').strip().split('/')[-1] for x in fid['OpusFileOriginal'][...]]
       if not basef in specs: 
         logger.warning('%s is not in the barcos file'%basef); 
@@ -239,8 +241,8 @@ def get_spec_info(instrument,file_list,specfilter=True,logger=rootlogger):
       specinfo[basef]['LWN']= fid['Inst']['LWN'][indx]
       specinfo[basef]['Tcorr'] = tcorr+fid['CorrectTime'][...][indx] if 'CorrectTime' in fid else tcorr
       ## calibration surface pressure
-      location=instrument.split('@')[-1];instrid=ft.determine_instrument(instrument='*',location=location)
-      specinfo[basef]['Pout']=calibration(specinfo[basef]['stime'],specinfo[basef]['Pout'],instrid['pressure_calibration'])
+      instrid=ft.determine_instrument(instrument=instrument)
+      specinfo[basef]['Pout']=calibration(specinfo[basef]['date'],specinfo[basef]['Pout'],instrid['pressure_tccon'])
       for key in ('Pins','Tins','Hins','Pout','Tout','Hout', 'WSPD', 'WDIR'): 
         if not isfinite(specinfo[basef][key]): specinfo[basef][key] = 0 ## default values
       if not isfinite(specinfo[basef]['FVSI']):  specinfo[basef]['FVSI'] = 0.0074
@@ -446,7 +448,6 @@ def i2s(instrument,stime=None,etime=None,npool=4,skipi2s=False,filelist=None,log
             
           break
       fid.close()
-      #print (os.path.abspath(f))
       out[basef]['file']=os.path.abspath(f)
       out[basef]['fsf']=0.99999999
       out[basef]['lasf']=15798.014   ### fixed ? ### TBD
@@ -702,6 +703,12 @@ def main(instrument,stime,etime,skipmod=False,skipi2s=False,npool=8,simulation=T
   global gggpath, pro , lat, lon, alt
   global speclinkfolder
   gggpath = gggconfig['ggg2020.config']['gggpath']; pro = gggconfig[instrument]['pro']
+  ##logfile
+  #stdoutOrigin=sys.stdout
+  #logpath=os.path.join('/bira-iasb/projects/FTIR/retrievals/working',user,'ggg2020',instrument.split('@')[1],instrument.split('@')[0],'log')
+  #if not os.path.isdir(logpath): subprocess.call('mkdir -p %s'%logpath,shell=True)
+  #logfile=os.path.join(logpath,'log_%s_%s.txt'%(stime.strftime('%Y%m%d'),etime.strftime('%Y%m%d')))
+  #sys.stdout = open(logfile,'w')
   ### step 1: run I2S 
   filelist = create_filelist(instrument, stime,etime)
   if not len(filelist): logger.warning('no spectra found'); return 1
@@ -737,6 +744,8 @@ def main(instrument,stime,etime,skipmod=False,skipi2s=False,npool=8,simulation=T
       fid.writelines('\n'.join(filelist)+'\n');
   _clean(stime,etime,pro)
   maillogger.info('%s - %s ggg2020 finished'%(stime.strftime('%Y%m%s'),etime.strftime('%Y%m%d')))
+  #sys.stdout.close()
+  #sys.stdout=stdoutOrigin
 
 #if __name__ == '__main__':
   

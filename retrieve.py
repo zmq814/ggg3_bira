@@ -43,6 +43,8 @@ testlogger=logging.getLogger(rootlogger.name+'.TEST');testlogger.setLevel(loggin
 #### SPECIAL LOGGERS 
 import logging.handlers
 
+
+
 maillogger=logging.getLogger(rootlogger.name+'.MAIL');maillogger.setLevel(logging.INFO)
 maillogger.addHandler(logging.handlers.SMTPHandler(mailhost=("smtp.oma.be", 25),
                                             fromaddr="%s@aeronomie.be"%user, 
@@ -704,11 +706,11 @@ def main(instrument,stime,etime,skipmod=False,skipi2s=False,npool=8,simulation=T
   global speclinkfolder
   gggpath = gggconfig['ggg2020.config']['gggpath']; pro = gggconfig[instrument]['pro']
   ##logfile
-  #stdoutOrigin=sys.stdout
-  #logpath=os.path.join('/bira-iasb/projects/FTIR/retrievals/working',user,'ggg2020',instrument.split('@')[1],instrument.split('@')[0],'log')
-  #if not os.path.isdir(logpath): subprocess.call('mkdir -p %s'%logpath,shell=True)
-  #logfile=os.path.join(logpath,'log_%s_%s.txt'%(stime.strftime('%Y%m%d'),etime.strftime('%Y%m%d')))
-  #sys.stdout = open(logfile,'w')
+  if quiet:
+    logpath=os.path.join('/bira-iasb/projects/FTIR/retrievals/working',user,'ggg2020',instrument.split('@')[1],instrument.split('@')[0],'log')
+    if not os.path.isdir(logpath): subprocess.call('mkdir -p %s'%logpath,shell=True)
+    logfile=os.path.join(logpath,'log_%s_%s.txt'%(stime.strftime('%Y%m%d'),etime.strftime('%Y%m%d')))
+    ft.create_log_file(logger,logfile)
   ### step 1: run I2S 
   filelist = create_filelist(instrument, stime,etime)
   if not len(filelist): logger.warning('no spectra found'); return 1
@@ -732,10 +734,11 @@ def main(instrument,stime,etime,skipmod=False,skipi2s=False,npool=8,simulation=T
   ### step 6: run gfit 
   if not simulation:
     logger.info('running GFIT ...')
-    try: subprocess.call('parallel -j%i -t --delay 2 < multiggg.sh'%npool,shell=True)
+    STDOUT = '' if not quiet else '>> %s'%logfile 
+    try: subprocess.call('parallel -j%i -t --delay 2 < multiggg.sh %s'%(npool, STDOUT),shell=True)
     except KeyboardInterrupt: raise KeyboardInterruptError()
     logger.info('running post processing ...')
-    subprocess.call('bash post_processing.sh',shell=True)
+    subprocess.call('bash post_processing.sh %s'%STDOUT,shell=True)
     output_filelist_dir= os.path.join(wkdir,'../filelists')
     if not os.path.isdir(output_filelist_dir): commandstar('mkdir -p %s; chmod -R 775 %s'%(output_filelist_dir,output_filelist_dir))
     output_filelist = os.path.join(output_filelist_dir,'filelist_%s_%s.txt'%(stime.strftime('%Y%m%d'),etime.strftime('%Y%m%d')))
@@ -744,8 +747,6 @@ def main(instrument,stime,etime,skipmod=False,skipi2s=False,npool=8,simulation=T
       fid.writelines('\n'.join(filelist)+'\n');
   _clean(stime,etime,pro)
   maillogger.info('%s - %s ggg2020 finished'%(stime.strftime('%Y%m%s'),etime.strftime('%Y%m%d')))
-  #sys.stdout.close()
-  #sys.stdout=stdoutOrigin
 
 #if __name__ == '__main__':
   
